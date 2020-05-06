@@ -18,13 +18,16 @@ func main() {
 			"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 		},
 	}
-	got, err := chaoHttp.Resolve(request)
+	download := &chaoHttp.Downloader{
+		PoolSize:  10,
+		ChuckSize: 1024 * 1024,
+	}
+	err := download.Init(request)
 	if err != nil {
 		fmt.Println(err)
 	}
-	err = chaoHttp.Down(request)
+	err = download.Down()
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Println(got)
 }
