@@ -12,3 +12,15 @@
 ## 使用说明
     1、如有片段提示下载失败，重新执行程序即可，直到没有任何错误提示
     2、如需重新下载文件，请删除yaml配置文件
+    
+## 使用技巧
+    1、下载github文件。调小chunkSize，调大poolSize
+    2、github总是链接失败，由于github好像是随机服务器，有些服务器国内屏蔽了，重新执行程序即可
+    3、后面的片段下载很慢，正常的，毕竟线程数量变少了。可以尝试，减小chunkSize后下载剩余的片段
+    4、出现net/http: TLS handshake timeout，建议逐渐调小chunkSize。
+    5、如果chunkSize过大，但是下载却很慢，总是失败，导致此段chunk总是下载失败
+
+## 建议参数
+
+- PoolSize 线程池大小(最终速度：ChuckSize*poolSize = 1024K*1024M*poolSize)
+- ChuckSize 每个线程池下载块大小（github建议1024 * 4，国内建议1024*1024） 

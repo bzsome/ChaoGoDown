@@ -14,8 +14,10 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type Downloader struct {
@@ -27,6 +29,9 @@ type Downloader struct {
 	PoolSize int
 	//每个线程池下载块大小
 	ChuckSize int64
+	doneChan  chan [2]int64
+	index     int64
+	mutex     sync.Mutex
 }
 
 // 返回文件的相关信息
@@ -96,7 +101,7 @@ func (down *Downloader) Init(request *Request) error {
 	defer fmt.Println()
 	fmt.Print("初始化:")
 
-	fmt.Print("->文件信息")
+	fmt.Print("->从服务器获取文件信息")
 	down.request = request
 	if down.FileName == "" {
 		down.FileName = path.Base(request.URL)
@@ -112,21 +117,31 @@ func (down *Downloader) Init(request *Request) error {
 	if err != nil {
 		return err
 	}
-	fmt.Print("->数据块信息")
+
+	fmt.Print("->读取数据块信息")
 	down.request.fileSize = down.response.Size
 	if down.ChuckSize <= 0 {
 		return errors.New("subSize大小不能为0")
 	}
-	down.initSubs()
+	err = down.initSubs()
+	if err != nil {
+		return err
+	}
 
 	fmt.Println("->初始化完成")
 	return nil
 }
 
 //初始化下载进度(首先重文件中读取已下载完成的片段)
-func (down *Downloader) initSubs() {
+func (down *Downloader) initSubs() error {
+	if down.request.fileSize <= 0 {
+		return errors.New("文件大小异常")
+	}
+
 	configFile := getConfigFile(down.request)
 	yamlConfig.GetConfigYaml(configFile, down.request)
+	down.request.Subeds = mergeSub(down.request.Subeds)
+
 	//构造完整的片段
 	allSubs, _ := down.generateSubs()
 
@@ -149,6 +164,7 @@ func (down *Downloader) initSubs() {
 		}
 	}
 	down.request.unSubs = tempSubeds
+	return nil
 }
 
 //获得配置文件名
@@ -168,41 +184,46 @@ func (down *Downloader) Down() error {
 		fn := down.doOneChuck(one)
 		wp.Do(fn)
 	}
-	//使用单独的线程输出进度
-	/*	go func() {
-		for {
-			time.Sleep(time.Second)
-			printRate(down.request)
-		}
-	}()*/
 	wp.Wait()
-	fmt.Println("OK，下载完成！")
+	if len(down.request.Subeds) == 1 {
+		fmt.Println("OK，下载完成！")
+	} else {
+		fmt.Println("ERR，部分片段失败，请重试！")
+	}
 	return nil
 }
 
 func (down *Downloader) doOneChuck(one [2]int64) func() error {
 	return func() error {
-		done := downDone(down.request, one)
-		downChunk(down.request, down.file, one[0], one[1], done)
+		done := down.downDone(one)
+		down.downChunk(one[0], one[1], done)
 		return nil
 	}
 }
 
 //下载完成回调
-func downDone(request *Request, one [2]int64) func(err error) {
+func (down *Downloader) downDone(one [2]int64) func(err error) {
 	done := func(err error) {
 		if err != nil {
 			fmt.Printf("down err %10s %10s %s\n", humanize.Bytes(uint64(one[0])), humanize.Bytes(uint64(one[1])), err)
 		} else {
-			printRate(request)
-			request.Subeds = append(request.Subeds, [2]int64{one[0], one[1]})
-			request.unSubs = DeleteSlice(request.Subeds, one)
-
-			configFile := getConfigFile(request)
-			yamlConfig.WriteConfigYaml(configFile, request)
+			down.mutex.Lock()
+			downDone(down.request, one)
+			down.mutex.Unlock()
 		}
 	}
 	return done
+}
+
+//下载完成回调
+func downDone(request *Request, one [2]int64) {
+	printRate(request)
+	request.Subeds = append(request.Subeds, [2]int64{one[0], one[1]})
+	request.unSubs = DeleteSlice(request.Subeds, one)
+
+	configFile := getConfigFile(request)
+	request.Subeds = mergeSub(request.Subeds)
+	yamlConfig.WriteConfigYaml(configFile, request)
 }
 
 //构造完整下载的片段
@@ -227,7 +248,7 @@ func (down *Downloader) generateSubs() ([][2]int64, error) {
 			chunkStart = chunkStart + down.ChuckSize
 		}
 	} else {
-		//不支持断点续传，则一次性全部下载
+		fmt.Println("不支持断点续传，一次性全部下载")
 		subs = [][2]int64{{0, response.Size}}
 	}
 	return subs, nil
@@ -261,14 +282,16 @@ func BuildHTTPClient() *http.Client {
 }
 
 //分段下载，指定下载的起始
-func downChunk(request *Request, file *os.File, start int64, end int64, done func(err error)) {
+func (down *Downloader) downChunk(start int64, end int64, done func(err error)) {
 	if done == nil {
 		done = func(err error) {}
 	}
+	down.mutex.Lock()
+	down.index = down.index + 1
+	down.mutex.Unlock()
+	fmt.Printf("chunk[%3d]   start - end   %10s -%10s\n", down.index, formatFileSize(start), formatFileSize(end))
 
-	fmt.Printf("chunk   start - end   %10s -%10s\n", formatFileSize(start), formatFileSize(end))
-
-	httpRequest, _ := BuildHTTPRequest(request)
+	httpRequest, _ := BuildHTTPRequest(down.request)
 	httpRequest.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 	httpClient := BuildHTTPClient()
 	httpResponse, err := httpClient.Do(httpRequest)
@@ -282,7 +305,7 @@ func downChunk(request *Request, file *os.File, start int64, end int64, done fun
 	for {
 		n, err := httpResponse.Body.Read(buf)
 		if n > 0 {
-			writeSize, err := file.WriteAt(buf[0:n], writeIndex)
+			writeSize, err := down.file.WriteAt(buf[0:n], writeIndex)
 			if err != nil {
 				done(err)
 				return
@@ -312,6 +335,7 @@ func printRate(request *Request) {
 	fmt.Printf("\rDownloading...%s %% \t (%s/%s) complete\n", rate, humanize.Bytes(uint64(total)), humanize.Bytes(uint64(fileSize)))
 }
 
+//删除指定的对象
 func DeleteSlice(list [][2]int64, one [2]int64) [][2]int64 {
 	ret := make([][2]int64, 0, len(list))
 	for _, val := range list {
@@ -322,6 +346,11 @@ func DeleteSlice(list [][2]int64, one [2]int64) [][2]int64 {
 	return ret
 }
 
+//根据下标删除
+func DeleteSlice2(list [][2]int64, index int) [][2]int64 {
+	return append(list[:index], list[index+1:]...)
+}
+
 func getDownTotal(request *Request) int64 {
 	var total = int64(0)
 	for _, one := range request.Subeds {
@@ -329,4 +358,26 @@ func getDownTotal(request *Request) int64 {
 		total = total + size
 	}
 	return total
+}
+
+//对号段排序
+func sortSub(subs [][2]int64) {
+	sort.Slice(subs, func(i, j int) bool {
+		return (subs)[i][0] < (subs)[j][0]
+	})
+}
+
+//合并连续的号段
+func mergeSub(subs [][2]int64) [][2]int64 {
+	//首先排序
+	sortSub(subs)
+	//如果结束大于等于 后面 的开始，则合并
+	for i := 0; i < len(subs)-1; i++ {
+		if subs[i][1] >= subs[i+1][0] {
+			subs[i][1] = subs[i+1][1]
+			subs = DeleteSlice2(subs, i+1)
+			i = i - 1
+		}
+	}
+	return subs
 }
