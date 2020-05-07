@@ -1,8 +1,9 @@
 package main
 
 import (
-	"chaoDown/chaoHttp"
 	"fmt"
+
+	"ChaoGoDown/chaoHttp"
 )
 
 //重试次数

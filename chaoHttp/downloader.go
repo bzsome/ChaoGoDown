@@ -1,12 +1,8 @@
 package chaoHttp
 
 import (
-	"chaoDown/yamlConfig"
 	"errors"
 	"fmt"
-	"github.com/dustin/go-humanize"
-	"github.com/shopspring/decimal"
-	"github.com/xxjwxc/gowp/workpool"
 	"io"
 	"mime"
 	"net/http"
@@ -18,6 +14,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"ChaoGoDown/yamlConfig"
+	"github.com/bzsome/chaoGo/workpool"
+	"github.com/dustin/go-humanize"
+	"github.com/shopspring/decimal"
 )
 
 type Downloader struct {

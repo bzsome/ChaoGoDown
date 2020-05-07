@@ -1,8 +1,9 @@
 package yamlConfig
 
 import (
-	"gopkg.in/yaml.v3"
 	"os"
+
+	"gopkg.in/yaml.v3"
 )
 
 func WriteConfigYaml(fileName string, v interface{}) {

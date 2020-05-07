@@ -1,3 +1,7 @@
+.idea/
+.DS_Store
+output/
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -12,5 +16,4 @@
 *.out
 
 debug
-
-.idea/
+go.sum
