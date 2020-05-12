@@ -22,17 +22,21 @@ import (
 )
 
 type Downloader struct {
-	request  *Request
-	response *Response
-	file     *os.File
+	Path     string
 	FileName string
 	//线程池大小
 	PoolSize int
 	//每个线程池下载块大小
 	ChuckSize int64
-	doneChan  chan [2]int64
-	index     int64
-	mutex     sync.Mutex
+
+	request      *Request
+	response     *Response
+	file         *os.File
+	fileFullName string
+	configFile   string
+	doneChan     chan [2]int64
+	index        int64
+	mutex        sync.Mutex
 }
 
 // 返回文件的相关信息
@@ -108,7 +112,21 @@ func (down *Downloader) Init(request *Request) error {
 		down.FileName = path.Base(request.URL)
 	}
 
-	file, err := os.OpenFile(down.FileName, os.O_RDWR|os.O_CREATE, 0777)
+	if len(down.request.URL) <= 3 {
+		return errors.New("url不能为空")
+	}
+
+	//创建下载目录文件夹
+	if _, err := os.Stat(down.Path); os.IsNotExist(err) {
+		err := os.Mkdir(down.Path, os.ModePerm)
+		if err != nil {
+			return err
+		}
+	}
+
+	down.fileFullName = path.Join(down.Path, down.FileName)
+	file, err := os.OpenFile(down.fileFullName, os.O_RDWR|os.O_CREATE, 0777)
+
 	if err != nil {
 		return err
 	}
@@ -139,8 +157,8 @@ func (down *Downloader) initSubs() error {
 		return errors.New("文件大小异常")
 	}
 
-	configFile := getConfigFile(down.request)
-	yamlConfig.GetConfigYaml(configFile, down.request)
+	down.configFile = down.fileFullName + ".yaml"
+	yamlConfig.GetConfigYaml(down.configFile, down.request)
 	down.request.Subeds = mergeSub(down.request.Subeds)
 
 	//构造完整的片段
@@ -166,12 +184,6 @@ func (down *Downloader) initSubs() error {
 	}
 	down.request.unSubs = tempSubeds
 	return nil
-}
-
-//获得配置文件名
-func getConfigFile(request *Request) string {
-	configFile := path.Base(request.URL) + "." + GetStringMd5(request.URL) + ".yaml"
-	return configFile
 }
 
 // Down
@@ -209,7 +221,7 @@ func (down *Downloader) downDone(one [2]int64) func(err error) {
 			fmt.Printf("down err %10s %10s %s\n", humanize.Bytes(uint64(one[0])), humanize.Bytes(uint64(one[1])), err)
 		} else {
 			down.mutex.Lock()
-			downDone(down.request, one)
+			downDone(down, one)
 			down.mutex.Unlock()
 		}
 	}
@@ -217,14 +229,15 @@ func (down *Downloader) downDone(one [2]int64) func(err error) {
 }
 
 //下载完成回调
-func downDone(request *Request, one [2]int64) {
+func downDone(down *Downloader, one [2]int64) {
+	request := down.request
 	printRate(request)
+
 	request.Subeds = append(request.Subeds, [2]int64{one[0], one[1]})
 	request.unSubs = DeleteSlice(request.Subeds, one)
-
-	configFile := getConfigFile(request)
 	request.Subeds = mergeSub(request.Subeds)
-	yamlConfig.WriteConfigYaml(configFile, request)
+
+	yamlConfig.WriteConfigYaml(down.configFile, request)
 }
 
 //构造完整下载的片段
@@ -290,7 +303,7 @@ func (down *Downloader) downChunk(start int64, end int64, done func(err error)) 
 	down.mutex.Lock()
 	down.index = down.index + 1
 	down.mutex.Unlock()
-	fmt.Printf("chunk[%3d]   start - end   %10s -%10s\n", down.index, formatFileSize(start), formatFileSize(end))
+	fmt.Printf("chunk[%3d]   start - end   %10s -%10s\n", down.index, humanize.Bytes(uint64(start)), humanize.Bytes(uint64(end)))
 
 	httpRequest, _ := BuildHTTPRequest(down.request)
 	httpRequest.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", start, end))

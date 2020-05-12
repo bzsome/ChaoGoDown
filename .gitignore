@@ -3,7 +3,6 @@
 output/
 
 # Binaries for programs and plugins
-*.exe
 *.exe~
 *.dll
 *.so
@@ -17,3 +16,4 @@ output/
 
 debug
 go.sum
+downloads
