@@ -45,4 +45,6 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	}
+	time := download.GetExeTime()
+	fmt.Printf("下载用时：%.2f 秒", time.Seconds())
 }

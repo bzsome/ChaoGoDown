@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"ChaoGoDown/yamlConfig"
 	"github.com/bzsome/chaoGo/workpool"
@@ -22,21 +23,23 @@ import (
 )
 
 type Downloader struct {
-	Path     string
-	FileName string
-	//线程池大小
-	PoolSize int
-	//每个线程池下载块大小
-	ChuckSize int64
+	Path      string
+	FileName  string
+	PoolSize  int   //线程池大小
+	ChuckSize int64 //每个线程池下载块大小
 
 	request      *Request
 	response     *Response
-	file         *os.File
-	fileFullName string
-	configFile   string
-	doneChan     chan [2]int64
-	index        int64
-	mutex        sync.Mutex
+	osFile       *os.File
+	fileFullName string // 文件夹+文件名
+	configFile   string // 配置文件名
+
+	//下载块序号
+	chunkIndex int64
+	//线程锁
+	chunkMutex sync.Mutex
+	statTime   time.Time
+	endTime    time.Time
 }
 
 // 返回文件的相关信息
@@ -112,7 +115,7 @@ func (down *Downloader) Init(request *Request) error {
 		down.FileName = path.Base(request.URL)
 	}
 
-	if len(down.request.URL) <= 3 {
+	if !strings.HasPrefix(down.request.URL, "http") {
 		return errors.New("url不能为空")
 	}
 
@@ -130,7 +133,7 @@ func (down *Downloader) Init(request *Request) error {
 	if err != nil {
 		return err
 	}
-	down.file = file
+	down.osFile = file
 	down.request = request
 	down.response, err = down.Resolve()
 	if err != nil {
@@ -154,7 +157,7 @@ func (down *Downloader) Init(request *Request) error {
 //初始化下载进度(首先重文件中读取已下载完成的片段)
 func (down *Downloader) initSubs() error {
 	if down.request.fileSize <= 0 {
-		return errors.New("文件大小异常")
+		return errors.New("无法获得文件大小")
 	}
 
 	down.configFile = down.fileFullName + ".yaml"
@@ -189,15 +192,18 @@ func (down *Downloader) initSubs() error {
 // Down
 //支持分段下载，且程序中断重启能够继续下载
 func (down *Downloader) Down() error {
-	defer down.file.Close()
+	defer down.osFile.Close()
 
+	down.statTime = time.Now()
 	wp := workpool.New(down.PoolSize)
-	for _, one := range down.request.unSubs {
+	for _, oneChuck := range down.request.unSubs {
 		//注意闭包
-		fn := down.doOneChuck(one)
-		wp.Do(fn)
+		doOneChuck := down.doOneChuck(oneChuck)
+		wp.Do(doOneChuck)
 	}
 	wp.Wait()
+	down.endTime = time.Now()
+
 	if len(down.request.Subeds) == 1 {
 		fmt.Println("OK，下载完成！")
 	} else {
@@ -220,9 +226,9 @@ func (down *Downloader) downDone(one [2]int64) func(err error) {
 		if err != nil {
 			fmt.Printf("down err %10s %10s %s\n", humanize.Bytes(uint64(one[0])), humanize.Bytes(uint64(one[1])), err)
 		} else {
-			down.mutex.Lock()
+			down.chunkMutex.Lock()
 			downDone(down, one)
-			down.mutex.Unlock()
+			down.chunkMutex.Unlock()
 		}
 	}
 	return done
@@ -231,13 +237,15 @@ func (down *Downloader) downDone(one [2]int64) func(err error) {
 //下载完成回调
 func downDone(down *Downloader, one [2]int64) {
 	request := down.request
-	printRate(request)
 
-	request.Subeds = append(request.Subeds, [2]int64{one[0], one[1]})
-	request.unSubs = DeleteSlice(request.Subeds, one)
+	request.Subeds = append(request.Subeds, one)
+	request.unSubs = DeleteSliceObject(request.Subeds, one)
 	request.Subeds = mergeSub(request.Subeds)
 
 	yamlConfig.WriteConfigYaml(down.configFile, request)
+
+	//先处理下载进度，后打印(否则不精准)
+	printRate(request)
 }
 
 //构造完整下载的片段
@@ -300,10 +308,10 @@ func (down *Downloader) downChunk(start int64, end int64, done func(err error)) 
 	if done == nil {
 		done = func(err error) {}
 	}
-	down.mutex.Lock()
-	down.index = down.index + 1
-	down.mutex.Unlock()
-	fmt.Printf("chunk[%3d]   start - end   %10s -%10s\n", down.index, humanize.Bytes(uint64(start)), humanize.Bytes(uint64(end)))
+	down.chunkMutex.Lock()
+	down.chunkIndex = down.chunkIndex + 1
+	down.chunkMutex.Unlock()
+	fmt.Printf("chunk[%3d]   start - end   %10s -%10s\n", down.chunkIndex, humanize.Bytes(uint64(start)), humanize.Bytes(uint64(end)))
 
 	httpRequest, _ := BuildHTTPRequest(down.request)
 	httpRequest.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", start, end))
@@ -319,7 +327,7 @@ func (down *Downloader) downChunk(start int64, end int64, done func(err error)) 
 	for {
 		n, err := httpResponse.Body.Read(buf)
 		if n > 0 {
-			writeSize, err := down.file.WriteAt(buf[0:n], writeIndex)
+			writeSize, err := down.osFile.WriteAt(buf[0:n], writeIndex)
 			if err != nil {
 				done(err)
 				return
@@ -337,6 +345,7 @@ func (down *Downloader) downChunk(start int64, end int64, done func(err error)) 
 	}
 }
 
+//打印下载进度
 func printRate(request *Request) {
 	fileSize := request.fileSize
 	total := getDownTotal(request)
@@ -350,7 +359,7 @@ func printRate(request *Request) {
 }
 
 //删除指定的对象
-func DeleteSlice(list [][2]int64, one [2]int64) [][2]int64 {
+func DeleteSliceObject(list [][2]int64, one [2]int64) [][2]int64 {
 	ret := make([][2]int64, 0, len(list))
 	for _, val := range list {
 		if val[0] == one[0] && val[1] == one[1] {
@@ -361,7 +370,7 @@ func DeleteSlice(list [][2]int64, one [2]int64) [][2]int64 {
 }
 
 //根据下标删除
-func DeleteSlice2(list [][2]int64, index int) [][2]int64 {
+func DeleteSliceIndex(list [][2]int64, index int) [][2]int64 {
 	return append(list[:index], list[index+1:]...)
 }
 
@@ -389,9 +398,14 @@ func mergeSub(subs [][2]int64) [][2]int64 {
 	for i := 0; i < len(subs)-1; i++ {
 		if subs[i][1] >= subs[i+1][0] {
 			subs[i][1] = subs[i+1][1]
-			subs = DeleteSlice2(subs, i+1)
+			subs = DeleteSliceIndex(subs, i+1)
 			i = i - 1
 		}
 	}
 	return subs
+}
+
+//构造完整下载的片段
+func (down *Downloader) GetExeTime() time.Duration {
+	return down.endTime.Sub(down.statTime)
 }

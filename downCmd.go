@@ -1,10 +1,12 @@
 package main
 
 import (
-	"ChaoGoDown/chaoHttp"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
+
+	"ChaoGoDown/chaoHttp"
 )
 
 //重试次数
@@ -30,11 +32,10 @@ func main() {
 	flag.Int64Var(&ChuckSize, "c", 1024*100, "数据块大小，默认100K")
 	flag.StringVar(&path, "path", "downloads", "保存路径")
 
-	fmt.Println(os.Args)
 	// 从arguments中解析注册的flag。必须在所有flag都注册好而未访问其值时执行。未注册却使用flag -help时，会返回ErrHelp。
 	flag.Parse()
 
-	fmt.Println(flag.Args())
+	fmt.Println("参数：", os.Args)
 
 	request := &chaoHttp.Request{
 		Method: "get",
@@ -53,6 +54,11 @@ func main() {
 		ChuckSize: ChuckSize,
 		Path:      path,
 	}
+	if !strings.HasPrefix(url, "http") {
+		fmt.Println("url不能为空，", url)
+		return
+	}
+
 	for ; recount > 0; recount-- {
 		err := download.Init(request)
 		if err != nil {
@@ -67,5 +73,7 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	}
+	time := download.GetExeTime()
+	fmt.Printf("下载用时：%.2f 秒", time.Seconds())
 
 }
