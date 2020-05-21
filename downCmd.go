@@ -6,11 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"ChaoGoDown/chaoHttp"
+	"github.com/bzsome/ChaoGoDown/chaoDown"
 )
-
-//重试次数
-var recount = 5
 
 // flag包实现了命令行参数的解析。
 func main() {
@@ -37,7 +34,7 @@ func main() {
 
 	fmt.Println("参数：", os.Args)
 
-	request := &chaoHttp.Request{
+	request := &chaoDown.Request{
 		Method: "get",
 		URL:    url,
 		Header: map[string]string{
@@ -49,31 +46,26 @@ func main() {
 			"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 		},
 	}
-	download := &chaoHttp.Downloader{
+	download := &chaoDown.Downloader{
 		PoolSize:  PoolSize,
 		ChuckSize: ChuckSize,
 		Path:      path,
 	}
 	if !strings.HasPrefix(url, "http") {
-		fmt.Println("url不能为空，", url)
+		fmt.Println("cmd参数错误，url不能为空，", url)
 		return
 	}
 
-	for ; recount > 0; recount-- {
-		err := download.Init(request)
+	for recount := 5; recount > 0; recount-- {
+		err := download.Down(request)
 		if err != nil {
 			fmt.Println(err)
 			fmt.Println("\n正在重试：", recount-1, "...")
 		} else {
-			break
+			time := download.GetExeTime()
+			fmt.Printf("下载用时：%.2f 秒，保存路径：%s", time.Seconds(), download.GetSavePath())
+			return
 		}
 	}
-
-	err := download.Down()
-	if err != nil {
-		fmt.Println(err)
-	}
-	time := download.GetExeTime()
-	fmt.Printf("下载用时：%.2f 秒", time.Seconds())
 
 }

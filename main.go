@@ -3,18 +3,12 @@ package main
 import (
 	"fmt"
 
-	"ChaoGoDown/chaoHttp"
+	"github.com/bzsome/ChaoGoDown/chaoDown"
 )
 
-//重试次数
-var recount = 5
-
 func main() {
-	url := "https://github.com/iikira/BaiduPCS-Go/releases/download/v3.6.2/BaiduPCS-Go-v3.6.2-windows-x64.zip"
-	url = "https://codeload.github.com/alibaba/flutter-go/zip/master"
-	fmt.Println(url)
-	//url2 := "https://down.qq.com/qqweb/PCQQ/PCQQ_EXE/PCQQ2020.exe"
-	request := &chaoHttp.Request{
+	url := "https://codeload.github.com/alibaba/flutter-go/zip/master"
+	request := &chaoDown.Request{
 		Method: "get",
 		URL:    url,
 		Header: map[string]string{
@@ -26,25 +20,21 @@ func main() {
 			"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 		},
 	}
-	download := &chaoHttp.Downloader{
+	download := &chaoDown.Downloader{
 		PoolSize:  100,
 		ChuckSize: 1024 * 100,
 		Path:      "downloads",
 	}
-	for ; recount > 0; recount-- {
-		err := download.Init(request)
+	for recount := 5; recount > 0; recount-- {
+		err := download.Down(request)
 		if err != nil {
 			fmt.Println(err)
 			fmt.Println("\n正在重试：", recount-1, "...")
 		} else {
-			break
+			time := download.GetExeTime()
+			fmt.Printf("下载用时：%.2f 秒，保存路径：%s", time.Seconds(), download.GetSavePath())
+			return
 		}
 	}
 
-	err := download.Down()
-	if err != nil {
-		fmt.Println(err)
-	}
-	time := download.GetExeTime()
-	fmt.Printf("下载用时：%.2f 秒", time.Seconds())
 }

@@ -1,4 +1,4 @@
-module ChaoGoDown
+module github.com/bzsome/ChaoGoDown
 
 go 1.14
 
