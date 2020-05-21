@@ -24,6 +24,7 @@ func main() {
 		PoolSize:  100,
 		ChuckSize: 1024 * 100,
 		Path:      "downloads",
+		Wait:      false,
 	}
 	for recount := 5; recount > 0; recount-- {
 		err := download.Down(request)
@@ -31,6 +32,9 @@ func main() {
 			fmt.Println(err)
 			fmt.Println("\n正在重试：", recount-1, "...")
 		} else {
+			if !download.Wait {
+				download.WaitDone()
+			}
 			time := download.GetExeTime()
 			fmt.Printf("下载用时：%.2f 秒，保存路径：%s", time.Seconds(), download.GetSavePath())
 			return
