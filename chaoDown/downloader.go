@@ -207,9 +207,9 @@ func (down *Downloader) WaitDone() {
 	defer down.osFile.Close()
 	down.endTime = time.Now()
 	if len(down.request.Subeds) == 1 {
-		fmt.Printf("OK，%s 下载完成！", down.TaskName)
+		fmt.Printf("OK，%s 下载完成！\n", down.TaskName)
 	} else {
-		fmt.Printf("ERR，%s 部分片段失败，请重试！", down.TaskName)
+		fmt.Printf("ERR，%s 部分片段失败，请重试！\n", down.TaskName)
 	}
 }
 
@@ -217,7 +217,7 @@ func (down *Downloader) doOneChuck(one [2]int64) func() error {
 	return func() error {
 		down.chunkMutex.Lock()
 		down.chunkIndex = down.chunkIndex + 1
-		fmt.Printf("%s [%3d]  start - end  %6s - %6s\n", down.TaskName,
+		fmt.Printf("%s [%3d] start - end  %6s - %6s\n", down.TaskName,
 			down.chunkIndex, humanize.Bytes(uint64(one[0])), humanize.Bytes(uint64(one[1])))
 		down.chunkMutex.Unlock()
 
