@@ -32,7 +32,7 @@
       -c int
             数据块大小，默认100K (default 102400)
       -n int
-            并行数量,默认为10 (default 10)
+            并行数量,默认为50 (default 50)
       -path string
             保存路径 (default "downloads")
       -url string

@@ -25,6 +25,7 @@ func main() {
 		ChuckSize: 1024 * 100,
 		Path:      "downloads",
 		Wait:      false,
+		//TaskName:  "bzchao",
 	}
 	for recount := 5; recount > 0; recount-- {
 		err := download.Down(request)

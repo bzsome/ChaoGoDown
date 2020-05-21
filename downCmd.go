@@ -25,7 +25,7 @@ func main() {
 
 	// StringVar用指定的名称、控制台参数项目、默认值、使用信息注册一个string类型flag，并将flag的值保存到p指向的变量
 	flag.StringVar(&url, "url", "", "url地址, 必填")
-	flag.IntVar(&PoolSize, "n", 10, "并行数量,默认为10")
+	flag.IntVar(&PoolSize, "n", 50, "并行数量,默认为50")
 	flag.Int64Var(&ChuckSize, "c", 1024*100, "数据块大小，默认100K")
 	flag.StringVar(&path, "path", "downloads", "保存路径")
 

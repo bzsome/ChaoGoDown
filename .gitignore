@@ -7,6 +7,7 @@ output/
 *.dll
 *.so
 *.dylib
+*.exe
 
 # Test binary, built with `go test -c`
 *.test

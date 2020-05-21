@@ -31,6 +31,7 @@ type Downloader struct {
 	PoolSize  int    //线程池大小
 	ChuckSize int64  //每个线程池下载块大小
 	Wait      bool   //是否等待结束后才返回,false直接返回
+	TaskName  string //任务名称
 
 	request      *Request
 	osFile       *os.File // 保存至本地文件的file对象
@@ -103,8 +104,6 @@ func (down *Downloader) Resolve() error {
 func (down *Downloader) init(request *Request) error {
 	down.request = request
 
-	defer fmt.Println()
-
 	fmt.Print("->1.初始化用户配置")
 	if !strings.HasPrefix(request.URL, "http") {
 		return errors.New("url不能为空，" + request.URL)
@@ -134,6 +133,15 @@ func (down *Downloader) init(request *Request) error {
 		down.FileName = path.Base(request.URL)
 	}
 	down.fileFullName = path.Join(down.Path, down.FileName)
+	if down.TaskName == "" {
+		end := len(down.fileFullName)
+		start := end - 10
+		if end < 10 {
+			start = 0
+		}
+		down.TaskName = down.fileFullName[start:end]
+	}
+
 	file, err := os.OpenFile(down.fileFullName, os.O_RDWR|os.O_CREATE, 0777)
 	if err != nil {
 		return err
@@ -162,7 +170,7 @@ func (down *Downloader) Down(request *Request) error {
 		return err
 	}
 
-	fmt.Println("->开始下载")
+	fmt.Printf("->%s开始下载\n", down.TaskName)
 	//创建线程池下载文件
 	down.statTime = time.Now()
 
@@ -195,7 +203,8 @@ func (down *Downloader) doOneChuck(one [2]int64) func() error {
 	return func() error {
 		down.chunkMutex.Lock()
 		down.chunkIndex = down.chunkIndex + 1
-		fmt.Printf("chunk[%3d]   start - end   %10s -%10s\n", down.chunkIndex, humanize.Bytes(uint64(one[0])), humanize.Bytes(uint64(one[1])))
+		fmt.Printf("%s [%3d]  start - end  %6s - %6s\n", down.TaskName,
+			down.chunkIndex, humanize.Bytes(uint64(one[0])), humanize.Bytes(uint64(one[1])))
 		down.chunkMutex.Unlock()
 
 		httpRequest, err := utils.BuildHTTPRequest(down.request.Method, down.request.URL, down.request.Header)
@@ -213,7 +222,7 @@ func (down *Downloader) doOneChuck(one [2]int64) func() error {
 func (down *Downloader) downDone(one [2]int64) func(err error) {
 	done := func(err error) {
 		if err != nil {
-			fmt.Printf("down err %10s %10s %s\n", humanize.Bytes(uint64(one[0])), humanize.Bytes(uint64(one[1])), err)
+			fmt.Printf("%s down err %6s - %6s  %s\n", down.TaskName, humanize.Bytes(uint64(one[0])), humanize.Bytes(uint64(one[1])), err)
 		} else {
 			/*并发时涉及文件操作，注意线程安全*/
 			down.chunkMutex.Lock()
@@ -270,7 +279,8 @@ func (down *Downloader) printRate() {
 	fmt.Printf("\r%s", strings.Repeat(" ", 35))
 	rate := ds.Div(decimal.NewFromFloat(float64(fileSize)))
 
-	fmt.Printf("\rDownloading...%s %% \t (%s/%s) complete\n", rate, humanize.Bytes(uint64(total)), humanize.Bytes(uint64(fileSize)))
+	fmt.Printf("\r%s ...   %6s %%   (%6s/%6s) complete\n",
+		down.TaskName, rate, humanize.Bytes(uint64(total)), humanize.Bytes(uint64(fileSize)))
 }
 
 //初始化下载进度(首先重文件中读取已下载完成的片段)
