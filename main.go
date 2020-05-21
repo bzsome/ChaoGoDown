@@ -4,10 +4,12 @@ import (
 	"fmt"
 
 	"github.com/bzsome/ChaoGoDown/chaoDown"
+	"github.com/bzsome/ChaoGoDown/utils"
 )
 
 func main() {
 	url := "https://codeload.github.com/alibaba/flutter-go/zip/master"
+	//request配置参数仅第一次有用，第二次将配置文件中读取
 	request := &chaoDown.Request{
 		Method: "get",
 		URL:    url,
@@ -29,9 +31,14 @@ func main() {
 	}
 	for recount := 5; recount > 0; recount-- {
 		err := download.Down(request)
-		if err != nil {
+		//只有错误状态为重试才继续，否则打印错误，直接退出
+		if err == utils.RETRY {
 			fmt.Println(err)
 			fmt.Println("\n正在重试：", recount-1, "...")
+			continue
+		} else if err != nil {
+			fmt.Println(err)
+			return
 		} else {
 			if !download.Wait {
 				download.WaitDone()

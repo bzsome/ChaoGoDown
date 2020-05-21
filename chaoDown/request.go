@@ -1,10 +1,9 @@
 package chaoDown
 
 type Request struct {
-	Method  string
-	URL     string
-	Header  map[string]string
-	Content []byte
+	Method string
+	URL    string
+	Header map[string]string
 
 	//已下载的片段,用于重启程序继续下载，yaml使用数组储值
 	//必须公有，否则无法保证至yaml

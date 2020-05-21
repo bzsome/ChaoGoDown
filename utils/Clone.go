@@ -27,6 +27,7 @@ func CopyValue(to interface{}, from interface{}, emp func(interface{}) bool) {
 /**
 将from的值复制到to
 如果to的值为空，则从from读取值
+from必须传入指针
 */
 func CopyValue2(to interface{}, from interface{}, emp func(interface{}) bool) {
 	toElem := reflect.ValueOf(to).Elem()

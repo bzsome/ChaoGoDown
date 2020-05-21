@@ -45,9 +45,92 @@ type Downloader struct {
 	wp         *workpool.WorkPool //用户下载的线程池
 }
 
+// Down
+//支持分段下载，且程序中断重启能够继续下载
+func (down *Downloader) Down(request *Request) error {
+	//初始化下载文件信息
+	err := down.init(request)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("->%s开始下载\n", down.TaskName)
+	//创建线程池下载文件
+	down.statTime = time.Now()
+
+	down.wp = workpool.New(down.PoolSize)
+
+	for _, oneChuck := range down.request.unSubs {
+		//注意闭包(由于外部有for循环，因此这里单独一个方法来返回)
+		doOneChuck := down.doOneChuck(oneChuck)
+		down.wp.Do(doOneChuck)
+	}
+
+	if down.Wait {
+		down.WaitDone()
+	}
+	return nil
+}
+
+//初始化，分析url，获得文件长度；从配置文件中读取已下载块
+func (down *Downloader) init(request *Request) error {
+	down.request = request
+
+	fmt.Print("->1.初始化用户配置")
+	if !strings.HasPrefix(request.URL, "http") {
+		return errors.New("url不能为空，" + request.URL)
+	}
+
+	//创建下载目录文件夹
+	if _, err := os.Stat(down.Path); os.IsNotExist(err) {
+		if err := os.Mkdir(down.Path, os.ModePerm); err != nil {
+			return err
+		}
+	}
+
+	//设置默认值(没有指定的配置，从默认配置中读取)
+	utils.CopyValue2(down, &DefaultDownloader, utils.EmpValue)
+
+	fmt.Print("->2.从服务器获取信息")
+	//获得文件大小信息
+	if err := down.Resolve(*request); err != nil {
+		return err
+	}
+	if err := down.initFileName(*request); err != nil {
+		fmt.Println(err)
+		return utils.RETRY
+	}
+
+	/*注意，必须要先Resolve，主要是要获得文件名，后面的操作都基于文件名*/
+	fmt.Print("->3.读取配置文件")
+	down.configFile = down.fileFullName + ".yaml"
+	utils.GetConfigYaml(down.configFile, down.request)
+	if len(request.Subeds) == 1 {
+		return errors.New(down.TaskName + " 不再重复下载")
+	}
+
+	file, err := os.OpenFile(down.fileFullName, os.O_RDWR|os.O_CREATE, 0777)
+	if err != nil {
+		return err
+	} else {
+		down.osFile = file
+	}
+
+	fmt.Print("->4.分析数据块信息")
+	if down.ChuckSize <= 0 {
+		return errors.New("ChuckSize大小不能为0")
+	} else {
+		if err = down.initSubs(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // 返回文件的相关信息
-func (down *Downloader) Resolve() error {
-	httpRequest, err := utils.BuildHTTPRequest(down.request.Method, down.request.URL, down.request.Header)
+func (down *Downloader) Resolve(request Request) error {
+	httpRequest, err := utils.BuildHTTPRequest(request.Method, request.URL, request.Header)
 	if err != nil {
 		return err
 	}
@@ -100,32 +183,7 @@ func (down *Downloader) Resolve() error {
 	return nil
 }
 
-//初始化，分析url，获得文件长度；从配置文件中读取已下载块
-func (down *Downloader) init(request *Request) error {
-	down.request = request
-
-	fmt.Print("->1.初始化用户配置")
-	if !strings.HasPrefix(request.URL, "http") {
-		return errors.New("url不能为空，" + request.URL)
-	}
-
-	//创建下载目录文件夹
-	if _, err := os.Stat(down.Path); os.IsNotExist(err) {
-		if err := os.Mkdir(down.Path, os.ModePerm); err != nil {
-			return err
-		}
-	}
-
-	//设置默认值(没有指定的配置，从默认配置中读取)
-	utils.CopyValue2(down, &DefaultDownloader, utils.EmpValue)
-
-	fmt.Print("->2.读取服务器信息")
-
-	//获得文件大小信息
-	if err := down.Resolve(); err != nil {
-		return err
-	}
-
+func (down *Downloader) initFileName(request Request) error {
 	if down.FileName == "" {
 		down.FileName = down.request.fileName
 	}
@@ -142,60 +200,16 @@ func (down *Downloader) init(request *Request) error {
 		down.TaskName = down.fileFullName[start:end]
 	}
 
-	file, err := os.OpenFile(down.fileFullName, os.O_RDWR|os.O_CREATE, 0777)
-	if err != nil {
-		return err
-	} else {
-		down.osFile = file
-	}
-
-	fmt.Print("->3.读取数据块信息")
-	if down.ChuckSize <= 0 {
-		return errors.New("ChuckSize大小不能为0")
-	} else {
-		if err = down.initSubs(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
-
-// Down
-//支持分段下载，且程序中断重启能够继续下载
-func (down *Downloader) Down(request *Request) error {
-	//初始化下载文件信息
-	err := down.init(request)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("->%s开始下载\n", down.TaskName)
-	//创建线程池下载文件
-	down.statTime = time.Now()
-
-	down.wp = workpool.New(down.PoolSize)
-
-	for _, oneChuck := range down.request.unSubs {
-		//注意闭包(由于外部有for循环，因此这里单独一个方法来返回)
-		doOneChuck := down.doOneChuck(oneChuck)
-		down.wp.Do(doOneChuck)
-	}
-
-	if down.Wait {
-		down.WaitDone()
-	}
-	return nil
-}
-
 func (down *Downloader) WaitDone() {
 	down.wp.Wait()
 	defer down.osFile.Close()
 	down.endTime = time.Now()
 	if len(down.request.Subeds) == 1 {
-		fmt.Println("OK，下载完成！")
+		fmt.Printf("OK，%s 下载完成！", down.TaskName)
 	} else {
-		fmt.Println("ERR，部分片段失败，请重试！")
+		fmt.Printf("ERR，%s 部分片段失败，请重试！", down.TaskName)
 	}
 }
 
@@ -279,18 +293,16 @@ func (down *Downloader) printRate() {
 	fmt.Printf("\r%s", strings.Repeat(" ", 35))
 	rate := ds.Div(decimal.NewFromFloat(float64(fileSize)))
 
-	fmt.Printf("\r%s ...   %6s %%   (%6s/%6s) complete\n",
+	fmt.Printf("\r%s  ...   %6s %%    (%6s/%6s)\n",
 		down.TaskName, rate, humanize.Bytes(uint64(total)), humanize.Bytes(uint64(fileSize)))
 }
 
 //初始化下载进度(首先重文件中读取已下载完成的片段)
 func (down *Downloader) initSubs() error {
 	if down.request.fileSize <= 0 {
-		return errors.New("无法获得文件大小")
+		return errors.New(down.TaskName + " 无法获得文件大小")
 	}
 
-	down.configFile = down.fileFullName + ".yaml"
-	utils.GetConfigYaml(down.configFile, down.request)
 	down.request.Subeds = utils.MergeSub(down.request.Subeds)
 
 	//构造完整的片段
